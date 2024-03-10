@@ -1,0 +1,558 @@
+---
+title: "pse_analysis_individuals"
+embed-resources: true
+format: 
+  html:
+    toc: true
+    code-fold: true
+    fontsize: 1.1em
+execute:
+  echo: true
+  warning: false
+---
+
+## Demographics
+
+```{r - groups demographics}
+pacman::p_load(gtsummary, finalfit) #display tables for demographics.
+
+library(tidyverse)
+library(gtsummary, finalfit)
+
+#Reading data file
+whole_sample_demo <- read_csv("rawdata/Whole_sample_demographic data.csv", col_names = T)
+
+# Generate demographic table
+whole_sample_demo %>%
+  tbl_summary (by=group, type = age ~ "continuous")%>%
+  add_p()
+
+```
+
+## Set up the environment
+
+I am using the `MixedPsy` package to fit the psychometric functions. See: https://www.biorxiv.org/content/10.1101/2022.06.20.496855v1
+
+```{r}
+pacman::p_load(
+  tidyverse,  # Data manipulation and visualization
+  glue,       # String interpolation
+  here,       # File path manipulation
+  MixedPsy,   # Mixed factorial design analysis
+  lmerTest,   # ANOVA for linear mixed effects models
+  performance,# model testing
+  afex,       # Factorial experiment analysis
+  ggtext,     # Formatted text in ggplot2
+  ggrain,     # Sediment grain size analysis
+  ggpp,       # Enhanced ggplot2 features
+  sdamr       # Marine research data analysis
+)
+
+#----- custom plot theme
+
+text_size = 14
+strip_bg_color = "grey20"
+strip_text_color = "white"
+
+
+# custom APA plot
+theme_apa <- function(){
+  theme(
+    plot.title = element_markdown(size = text_size), # Adjust the size as needed
+    #legend.position = "right",
+    legend.text = element_markdown(size = text_size),
+    legend.title = element_text(face="bold", size = text_size + 2),
+    legend.key = element_blank(),
+    plot.caption = element_text(hjust = 0),
+    axis.text.x = element_text(size = text_size),
+    axis.text.y = element_text(size = text_size),
+    axis.title.x = element_markdown(size = text_size+2, face = "bold"),  # Bolds x title
+    axis.title.y = element_markdown(size = text_size+2, face = "bold"),  # Bolds y title
+    axis.title.x.top = element_markdown(size = text_size+2, face = "bold"),  # Bolds x title
+    axis.title.y.right = element_markdown(size = text_size+2, face = "bold"),  # Bolds y title
+    strip.text = element_text(size = text_size+2, face = "bold", color = strip_text_color),
+    strip.background = element_rect(fill = strip_bg_color, color = "black", size = 1),    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"), # Set the background color to white
+    axis.line = element_line(color = "black") # prevents axes from disappearing
+)}
+rawdata_folder <- here("rawdata")
+
+```
+
+## Single participant data example
+
+```{r}
+participant_data <- read_csv("rawdata/NONPRESSURE GROUP/rawP105.csv", col_names = F)
+names(participant_data) <- c("part_num", "block", "trial_num", "ratio", "choice", "decision", "correct_through", "ineficient_around", "risky_bump", "correct_around")
+head(participant_data)
+
+```
+
+```{r}
+participant_data %>% 
+    group_by(part_num, ratio) %>%
+    summarise(
+        choice_prob = mean(choice),
+        correct_through_prob = mean(correct_through),
+        risky_bump_prob = mean(risky_bump),
+        correct_around_prob = mean(correct_around),
+        ineficient_around_prob = mean(ineficient_around)
+    )
+```
+
+## Extracting data from all participants
+
+```{r nonpressure group}
+
+max_block <- 16
+group <- "NONPRESSURE GROUP"
+
+participants <- c(#101, 
+                  105, 108, 109, 110, 113, 116, 117, 120, 121, 124, 128, 129, 132, 134, 135, 136, 138, 141, 144, 146, 147, 150, 151, 152)
+
+combined_nonpressure_df <- tibble()
+
+for (part_num in participants)
+  {
+  
+    filename  <- glue("rawP", part_num, ".csv")
+    
+    df <- 
+      here(rawdata_folder, group, filename) %>% 
+      read_csv(col_names = F, show_col_types = FALSE)
+    
+    names(df) <- c("part_num", "block", "trial_num", "ratio", "choice", 
+               "decision", "correct_through", "ineficient_around", "risky_bump", "correct_around")
+    
+    df$group <- group %>% str_to_title()
+    size_df <- nrow(df)
+
+    df <- df %>%
+        arrange(block,trial_num) %>%
+        mutate(direction_block = rep(1:max_block, each = 9)) %>%
+        #mutate(direction = rep(c("Asc","Desc"), each = 9, size_df/18)) %>%
+        select(group, part_num, direction_block, everything())  
+    
+    combined_nonpressure_df <- bind_rows(combined_nonpressure_df, df)
+    
+    }
+
+write_csv(combined_nonpressure_df, here(rawdata_folder,
+                                      "combined_non_pressure_selection_data.csv"))
+
+```
+
+```{r pressure group}
+
+group <- "PRESSURE GROUP"
+
+participants <- c(102, 103, 104, 106, 107, 111, 112, 114, 115, 118, 119, 122, 123, 126, 127, 130, 131, 133, 137, 139, 140, 143, 145, 148, 149)
+
+
+combined_pressure_df <- tibble()
+
+for (part_num in participants)
+  {
+  
+    filename  <- glue("rawP", part_num, ".csv")
+    
+    df <- 
+      here(rawdata_folder, group, filename) %>% 
+      read_csv(col_names = F, show_col_types = FALSE)
+    
+    names(df) <- c("part_num", "block", "trial_num", "ratio", "choice", 
+               "decision", "correct_through", "ineficient_around", "risky_bump", "correct_around")
+    
+    df$group <- group %>% str_to_title()
+    size_df <- nrow(df)
+    max_block <- size_df / 9
+
+    df <- df %>%
+        arrange(block,trial_num) %>%
+        mutate(direction_block = rep(1:max_block, each = 9)) %>%
+        # mutate(direction = rep(c("Asc","Desc"), each = 9, size_df/18)) %>%
+        select(group, part_num, direction_block, everything())  
+    
+    combined_pressure_df <- bind_rows(combined_pressure_df, df)
+    
+    }
+
+write_csv(combined_pressure_df, here(rawdata_folder,
+                                      "combined_pressure_selection_data.csv"))
+
+```
+
+```{r combined data}
+pressure_df <- read_csv(here(rawdata_folder,
+                                      "combined_pressure_selection_data.csv"))
+
+nonpressure_df <- read_csv(here(rawdata_folder,
+                                      "combined_non_pressure_selection_data.csv"))
+
+filtered_data_raw_df <- bind_rows(nonpressure_df, pressure_df)
+```
+
+```{r}
+all_data_raw_df <- 
+  all_data_raw_df %>%
+  group_by(group, part_num, direction_block) %>%
+  mutate(starting_ratio = first(ratio),
+         ending_ratio = last(ratio),
+         direction = ifelse(starting_ratio > ending_ratio, 
+                            "descending", 
+                            "ascending"),
+         variance= var(decision),
+         correlation = cor(decision,ratio)
+                  )
+
+# getting rid of zero variance
+filtered_data_raw_df <- all_data_raw_df%>%
+  filter(variance!=0) %>%
+  filter(correlation>.25)  
+
+ruled_out_part_df <- all_data_raw_df%>%
+  filter(variance==0)
+  #filter(correlation>.45)
+
+all_participants <-all_data_raw_df$part_num%>%
+  unique()
+ruled_out_part <- filtered_data_raw_df$part_num%>%
+  unique()
+setdiff(all_participants, ruled_out_part)
+
+# testbed corr
+trial <- c(1,1,0,1,0,0,0,0,0)
+ratio <- seq(.6, 1.4, .1)
+
+cor(trial, ratio)
+
+
+```
+
+
+## Including the training conditions in the previous data frame
+```{r - New df including the "trained X "untrained conditions"}
+
+#Reading data file
+
+all_data_add_training <- filtered_data_raw_df[, c("group","part_num", "block", "trial_num", "ratio", "choice", "decision", "starting_ratio", "ending_ratio", "direction", "correlation", "variance")]%>%
+  arrange(all_data_bytraining_block, part_num)
+
+write_csv(all_data_add_training, "C:/Users/santo/Documents/Navigation_study/rawdata/training_conditions_test.csv")
+
+all_data_bytraining <- read_csv("rawdata/experience_condition.csv", col_names = T)
+
+
+```
+
+
+
+```{r getting counts}
+
+filtered_data_raw_df %>%
+  mutate(participant_factor=factor(part_num))%>%
+  group_by(group)%>%
+  summarise(counts= n_distinct(participant_factor))
+```
+
+## Correlation test-bed
+
+Use this section to make potential determinations about cut off correlation criteria.
+
+```{r}
+ggplot(filtered_data_raw_df, aes(x = correlation)) +
+  geom_histogram() +
+  theme_minimal()
+```
+
+```{r correlation for transitioning behavior}
+filtered_data_raw_df %>%
+  group_by(part_num, direction_block)%>%
+  summarise(correlation=cor(decision, ratio)%>% round(2))%>%
+  arrange(correlation)
+```
+
+```{r hypothetical transition ratio to find out an expected correlation}
+ratios=seq(.6,1.4,.1)
+direction=c(0,1,1,0,0,1,0,1,0)
+cor(ratios,direction)
+```
+
+## Individual PSE
+
+### data preparation
+
+I'll be using the `MixedPsy` package to calculate the PSE for each participant. The package requires the data to be in a specific format, so I'll need to do some data wrangling first.
+
+```{r}
+response_pse_df <- 
+  all_data_bytraining %>%
+  group_by(group, part_num, direction, ratio, experience) %>%
+  summarise(
+    total = n(), #why this total isn't 8 for each ratio for each particip?
+    through = sum(decision == "0"), # I corrected this!
+    around = sum(decision == "1"),
+  )
+
+##df %>% group_by(group_variable) %>% summarise(count = n()) 
+
+response_prob_df <- 
+  all_data_bytraining %>%
+  group_by(group, part_num, direction, ratio, decision, experience) %>%
+  summarise(
+    choice_prob = mean(choice),
+        #correct_through_prob = mean(correct_through),
+        #risky_bump_prob = mean(risky_bump),
+        #correct_around_prob = mean(correct_around),
+        #ineficient_around_prob = mean(ineficient_around)
+  )
+```
+
+### PSE calculation test
+
+```{r}
+# In this example we are calculating the PSE of:
+#   - participant 109
+#   - in the ascending direction
+
+# (this is done by explicitly filtering the data, when we
+#   batch this will be accomplished through grouping)
+
+test_df <-
+  response_pse_df %>%
+  filter(
+         part_num == 109,
+         direction == "descending",
+         experience == "trained")
+
+# write_csv(test_df, here("test_df.csv"))
+# I added direction next to ratio as a predictor. This mess up with the plotting. direction is nominal and ratio is numerical. Is that a reason for the issue?? The test_pse changes from .722 to .710 when direction was added.
+
+test_glm <- glm(formula = cbind(through, total - through) ~ ratio,
+                family = binomial(link = "probit"), data = test_df)
+
+test_pse <- MixedPsy::PsychDelta(test_glm)["pse", "Estimate"]
+
+test_pse
+
+PsychPlot(test_glm, showData = T, ps.lab = "test_glm")
+```
+
+```{r testing out individual ratio decisions}
+# not the behaviors are too unstable for this to reasonably work... plus this is not what J. Alt did.
+# # I added direction to the filter function.
+# # individual example:
+# test_df <- 
+#   filtered_data_raw_df %>%
+#   filter(part_num == 104)%>%
+#   group_by(part_num, direction_block)
+#          
+# # write_csv(test_df, here("test_df.csv"))
+# # I added direction next to ratio as a predictor. This mess up with the plotting. direction is nominal and ratio is numerical. Is that a reason for the issue?? The test_pse changes from .722 to .710 when direction was added.
+# 
+# test_glm <- glm(formula = decision ~ ratio,
+#                 family = binomial(link = "probit"), data = test_df%>%filter(direction_block==1))
+# beta0 <-coef(test_glm)[1]
+# beta1 <-coef(test_glm)[2]
+# pse= -beta0/beta1
+# 
+# test_df %>% 
+#   filter(direction_block==1)%>%
+#   ggplot(., aes(x = ratio, y = decision)) +   
+#   stat_smooth(method="glm", se=FALSE, method.args = list(family=binomial)) +
+#   geom_point()
+# 
+# #test_pse <- MixedPsy::PsychDelta(test_glm)["pse", "Estimate"]
+# 
+# PsychPlot(test_glm, showData = T, ps.lab = "test_glm")
+```
+
+## Batching this process
+
+```{r}
+# multiple participants:
+
+# fit_glm_pse <- function(data){
+#   mod <- glm(formula = decision ~ ratio,
+#                 family = binomial(link = "probit"), data = data)
+# beta0 <-coef(mod)[1]
+# beta1 <-coef(mod)[2]
+# pse= -beta0/beta1
+# return(pse)
+# }
+
+fit_glm_pse <- function(data){
+  mod <- glm(formula = cbind(through, total - through) ~ ratio, 
+             family = binomial(link = "probit"), data = data) 
+  psych_delta <- MixedPsy::PsychDelta(mod)
+  return(list(pse = psych_delta["pse","Estimate"], plot = PsychPlot(mod, showData = TRUE)))
+}
+
+  
+data_by_conditions <- 
+  response_pse_df %>%
+  group_by(group, part_num, direction, experience) %>%
+  nest()
+
+data_by_conditions <- 
+  data_by_conditions %>%
+  mutate(pse = map(data, fit_glm_pse)) 
+
+series <- data_by_conditions$data[1][[1]]%>%
+  mutate(prob= through/total)
+ggplot(data= series, aes(x= ratio, y= prob))+
+  geom_point()+
+  ggtitle("participant 105")+
+  geom_smooth(method= "glm")
+
+
+
+#ezDesign(data_by_conditions, x= group, y= direction, row= experience, col= ratio)
+
+
+by_subject_pse_df <- 
+  data_by_conditions %>% 
+  unnest_longer(pse) %>%
+  filter(pse_id == "pse") %>%
+  unnest(pse) %>%
+  select(-pse_id)
+  
+```
+
+```{r}
+#| eval: false
+
+
+# code for saving plots
+plots_folder <- here("plots")
+for (i in 1:nrow(data_by_conditions)){
+  my_plot <- data_by_conditions$pse[[i]]$plot
+  part_num <- data_by_conditions$part_num[i]
+  group <- data_by_conditions$group[i]
+  direction <- data_by_conditions$direction[i]
+  filename <- glue("p{part_num}_{group}_{direction}.png")
+  #print(filename)
+  ggsave(filename = here(plots_folder, filename), plot=my_plot)
+}
+```
+
+We should be able to take these values and submit them to a lmer
+
+## modeling the pse
+
+#### building the model:
+
+```{r}
+pse_mdl <- lmer(pse ~ group * direction * experience + (1|part_num), data = by_subject_pse_df)
+
+```
+
+#### testing model performance
+
+```{r}
+#| fig-height: 12
+#| fig-width: 6
+
+performance::check_model(pse_mdl)
+```
+
+Plots above suggest the model is pretty good. Is this still true after adding experience as a predictor? I'd say so.
+
+### Model results
+
+```{r}
+anova(pse_mdl)
+```
+
+```{r}
+pacman::p_load(emmeans)
+emmeans(pse_mdl, specs = ~ group)%>%
+  pairs()
+
+```
+
+The results of the above table suggest a potential interaction. Let's visualize.
+
+### plot of potential effects
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+ggplot(data = by_subject_pse_df, aes(x = group, y=pse, fill = direction, shape = direction)) +
+  geom_rain(rain.side = 'f2x2',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  stat_summary(fun = "mean", geom = "line", aes(lty = direction, group = direction),
+               position = position_dodge(width = .15))+
+  theme_apa() + xlab("Group") + ylab("pse") + 
+  scale_shape_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  #scale_fill_manual(values = c("black", "white"), labels = c("Ascending", "Descending")) +
+  scale_fill_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  guides(lty = "none",
+         color = "none") +
+  theme(legend.position = c(.4, .8))
+
+```
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+ggplot(data = by_subject_pse_df, aes(x = group, y=pse)) +
+  geom_rain(rain.side = 'f1x1',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  
+               theme_apa() + xlab("Group") + ylab("pse") 
+
+  
+```
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+ggplot(data = by_subject_pse_df, aes(x = direction, y=pse)) +
+  geom_rain(rain.side = 'f1x1',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  
+               theme_apa() + xlab("Group") + ylab("pse") 
+
+```
+
+
+## choice
+
+```{r}
+choice_mdl <- lmer(choice~group + (1|part_num), data = filtered_data_raw_df)
+summary(choice_mdl)
+
+#choice=1 (incorrect); choice= 0 (correct)
+```
+
+```{r}
+ggplot(filtered_data_raw_df, aes(x = ratio, y = choice, col = group)) +
+  stat_summary(fun.data = "mean_se") + 
+  facet_wrap(~direction, ncol = 1)
+```

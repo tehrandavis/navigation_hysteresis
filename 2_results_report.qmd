@@ -1,0 +1,419 @@
+---
+title: "Perceived Action Boundary Analysis"
+format: 
+  html:
+    code-fold: true
+    code-summary: "Show the code"
+    embed-resources: true
+    toc: true
+    toc-location: left
+    number-sections: true
+editor: visual
+execute:
+  warning: false
+---
+
+## Setting up the environment
+
+### Packages
+
+We are using the `MixedPsy` package to fit the psychometric functions. See: https://www.biorxiv.org/content/10.1101/2022.06.20.496855v1
+
+```{r}
+pacman::p_load(
+  tidyverse,  # Data manipulation and visualization
+  glue,       # String interpolation
+  here,       # File path manipulation
+  MixedPsy,   # Mixed factorial design analysis
+  lmerTest,   # ANOVA for linear mixed effects models
+  performance,# model testing
+  afex,       # Factorial experiment analysis
+  ggtext,     # Formatted text in ggplot2
+  ggrain,     # Sediment grain size analysis
+  ggpp,       # Enhanced ggplot2 features
+  sdamr       # Marine research data analysis
+)
+
+#----- custom plot theme
+
+text_size = 14
+strip_bg_color = "grey20"
+strip_text_color = "white"
+
+
+# custom APA plot
+theme_apa <- function(){
+  theme(
+    plot.title = element_markdown(size = text_size), # Adjust the size as needed
+    #legend.position = "right",
+    legend.text = element_markdown(size = text_size),
+    legend.title = element_text(face="bold", size = text_size + 2),
+    legend.key = element_blank(),
+    plot.caption = element_text(hjust = 0),
+    axis.text.x = element_text(size = text_size),
+    axis.text.y = element_text(size = text_size),
+    axis.title.x = element_markdown(size = text_size+2, face = "bold"),  # Bolds x title
+    axis.title.y = element_markdown(size = text_size+2, face = "bold"),  # Bolds y title
+    axis.title.x.top = element_markdown(size = text_size+2, face = "bold"),  # Bolds x title
+    axis.title.y.right = element_markdown(size = text_size+2, face = "bold"),  # Bolds y title
+    strip.text = element_text(size = text_size+2, face = "bold", color = strip_text_color),
+    strip.background = element_rect(fill = strip_bg_color, color = "black", size = 1),    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white"), # Set the background color to white
+    axis.line = element_line(color = "black") # prevents axes from disappearing
+)}
+rawdata_folder <- here("rawdata")
+
+```
+
+### loading in the data
+
+```{r combined data}
+pressure_df <- read_csv(here(rawdata_folder, "combined_pressure_selection_data.csv"))
+
+nonpressure_df <- read_csv(here(rawdata_folder, "combined_non_pressure_selection_data.csv"))
+
+all_data_raw_df <- bind_rows(nonpressure_df, pressure_df)
+
+DT::datatable(all_data_raw_df)
+```
+
+### adding direction label
+
+Regarding ratios: The closing gap between NPCs may be described by a minimum speed required to pass (Vmin) that is equal to the speed capacity of the actor (Vcap) or by a Vmin/Vcap ratio equal to 1; ratios below 1 were passable and those greater than 1.0 were not passable.
+
+The predictor "direction" has two scenarios: (1) ascending ratio and (2) descending ratio. However, the "ratio" is inversely related to the gap width. In the ascending scenario, the affordance for passing through the gap is being diminished over successive trials, while in the descending scenario, the affordance for passing through the gap is emerging.
+
+Therefore, for each block, if the starting ratio is greater than the ending ratio (i.e., descending), then the direction is "Affordance emerging". Otherwise, the direction is "Affordance disappearing". 
+
+```{r}
+all_data_raw_df <- 
+  all_data_raw_df %>%
+  # split by group, then participant, then direction_block
+  group_by(group, part_num, direction_block) %>%
+  # perform the following within each direction_block
+  mutate(starting_ratio = first(ratio),
+         ending_ratio = last(ratio),
+         direction = ifelse(starting_ratio > ending_ratio, 
+                            # starts at 1.4 and goes to 0.6
+                            "Affordance emerging", 
+                            "Affordance disappearing"),
+         variance= var(decision) # get the variance of the decision
+                  )
+```
+
+### filtering blocks
+
+Filtering out blocks with low variance. This is done to remove blocks where the participant is not changing their behavior.
+  
+```{r}
+# getting rid of zero variance as it means no change in behavior
+filtered_data_raw_df <- all_data_raw_df%>%
+  filter(variance > .15)  
+```
+
+## Individual perceptual boundary example
+
+We take as the perceptual boundary the point at which the participant is equally likely to choose either option (using a psychmetric function). We will take this value and use it as the dependent variable in a linear mixed effects model.
+
+I'll be using the `MixedPsy` package to calculate the PAB for each participant. The package requires the data to be in a specific format, so I'll need to do some data wrangling first.
+
+```{r}
+response_pab_df <- 
+  filtered_data_raw_df %>%
+  group_by(group, part_num, direction, ratio, session) %>%
+  summarise(
+    total = n(), #why this total isn't 8 for each ratio for each particip?
+    through = sum(decision == "0"), # I corrected this!
+    around = sum(decision == "1"),
+  )
+
+
+response_prob_df <- 
+  filtered_data_raw_df %>%
+  group_by(group, part_num, direction, ratio, session) %>%
+  summarise(
+    choice_prob = mean(choice),
+        #correct_through_prob = mean(correct_through),
+        #risky_bump_prob = mean(risky_bump),
+        #correct_around_prob = mean(correct_around),
+        #ineficient_around_prob = mean(ineficient_around)
+  )
+```
+
+### Perceived action boundary calculation
+
+```{r}
+# In this example we are calculating the Perceived action boundary (PAB) of:
+#   - participant 109
+#   - in the ascending direction
+
+# (this is done by explicitly filtering the data, when we
+#   batch this will be accomplished through grouping)
+
+test_df <-
+  response_pab_df %>%
+  filter(
+         part_num == 109,
+         direction == "Affordance disappearing",
+         session == "Session 1"
+         )
+
+# write_csv(test_df, here("test_df.csv"))
+# I added direction next to ratio as a predictor. This mess up with the plotting. direction is nominal and ratio is numerical. Is that a reason for the issue?? The test_pab changes from .722 to .710 when direction was added.
+
+test_glm <- glm(formula = cbind(through, total - through) ~ ratio,
+                family = binomial(link = "probit"), data = test_df)
+
+test_pab <- MixedPsy::PsychDelta(test_glm)["pse", "Estimate"]
+
+test_pab
+
+PsychPlot(test_glm, showData = T, ps.lab = "test_glm")
+```
+
+## Batched Perceived Action Boundary Calculation
+
+```{r}
+# multiple participants:
+
+# fit_glm_pab <- function(data){
+#   mod <- glm(formula = decision ~ ratio,
+#                 family = binomial(link = "probit"), data = data)
+# beta0 <-coef(mod)[1]
+# beta1 <-coef(mod)[2]
+# pab= -beta0/beta1
+# return(pab)
+# }
+
+fit_glm_pab <- function(data){
+  mod <- glm(formula = cbind(through, total - through) ~ ratio, 
+             family = binomial(link = "probit"), data = data) 
+  psych_delta <- MixedPsy::PsychDelta(mod)
+  return(list(pab = psych_delta["pse","Estimate"]))
+}
+
+  
+data_by_conditions <- 
+  response_pab_df %>%
+  group_by(group, part_num, direction, session) %>%
+  nest()
+
+data_by_conditions <- 
+  data_by_conditions %>%
+  mutate(pab = map(data, fit_glm_pab)) 
+
+by_subject_pab_df <- 
+  data_by_conditions %>% 
+  unnest_longer(pab) %>%
+  filter(pab_id == "pab") %>%
+  unnest(pab) %>%
+  select(-pab_id)
+  
+```
+
+```{r}
+#| eval: false
+
+
+# code for saving plots
+plots_folder <- here("plots")
+for (i in 1:nrow(data_by_conditions)){
+  my_plot <- data_by_conditions$pab[[i]]$plot
+  part_num <- data_by_conditions$part_num[i]
+  group <- data_by_conditions$group[i]
+  direction <- data_by_conditions$direction[i]
+  filename <- glue("p{part_num}_{group}_{direction}.png")
+  #print(filename)
+  ggsave(filename = here(plots_folder, filename), plot=my_plot)
+}
+```
+
+We should be able to take these values and submit them to a lmer
+
+## Results: modeling the Perceived Action Boundary
+
+### building the models:
+
+I want to test the following models:
+- a model with random slopes for session
+- a model with random intercepts only
+
+```{r}
+pab_mdl <- lmer(pab ~ group * direction * session + (session|part_num), 
+                data = by_subject_pab_df %>% filter(pab > .5))
+
+rand_int_only_mdl <- lmer(pab ~ group * direction * session + (1|part_num), 
+                data = by_subject_pab_df %>% filter(pab > .5))
+```
+
+### Random slopes model results
+
+```{r}
+anova(pab_mdl)
+```
+
+The results of the above table suggest a group:direction interaction. Let's visualize and test
+
+#### group by direction interaction
+
+```{r}
+emmeans::emmeans(pab_mdl, specs = pairwise ~ direction|group)
+```
+
+#### plot of group by direction interaction
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+by_subject_pab_df %>%
+  filter(pab > .5) %>%
+  ggplot(data = , aes(x = group, y=pab, fill = direction, shape = direction)) +
+  geom_rain(rain.side = 'f2x2',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  stat_summary(fun = "mean", geom = "line", aes(lty = direction, group = direction),
+               position = position_dodge(width = .15))+
+  theme_apa() + xlab("Group") + ylab("Perceived Action Boundary") + 
+  #scale_shape_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  #scale_fill_manual(values = c("black", "white"), labels = c("Ascending", "Descending")) +
+  #scale_fill_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  guides(lty = "none",
+         color = "none") +
+  theme(legend.position = c(.5, .8))
+
+```
+
+
+#### group effect
+```{r}
+emmeans::emmeans(pab_mdl, specs = pairwise ~ group) 
+```
+
+#### plot of group effect
+
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+by_subject_pab_df %>%
+  filter(pab > .5) %>%
+  ggplot(data = , aes(x = group, y=pab)) +
+  geom_rain(rain.side = 'f2x2',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  stat_summary(fun = "mean", geom = "line", aes(group = 1),
+               position = position_dodge(width = .15))+
+  theme_apa() + xlab("Group") + ylab("Perceived action boundary") + 
+  #scale_shape_discrete(name="session", labels=c("Session 1", "Session 2")) +
+  #scale_fill_manual(values = c("black", "white"), labels = c("Ascending", "Descending")) +
+  scale_fill_discrete(name="session", labels=c("Session 1", "Session 2")) +
+  guides(lty = "none",
+         color = "none") +
+  theme(legend.position = c(.4, .8))
+
+```
+
+
+### rand intercepts only model
+
+```{r}
+anova(rand_int_only_mdl)
+```
+#### group by session interaction:
+
+```{r}
+emmeans::emmeans(rand_int_only_mdl, specs = pairwise ~ direction|group)
+```
+
+#### plot of group by session interaction
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+by_subject_pab_df %>%
+  filter(pab > .5) %>%
+  ggplot(data = , aes(x = group, y=pab, fill = session, shape = session)) +
+  geom_rain(rain.side = 'f2x2',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  theme_apa() + xlab("Group") + ylab("Perceived action boundary") + 
+  #scale_shape_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  #scale_fill_manual(values = c("black", "white"), labels = c("Ascending", "Descending")) +
+  #scale_fill_discrete(name="Direction", labels=c("Ascending", "Descending")) +
+  guides(lty = "none",
+         color = "none") +
+  theme(legend.position = c(.4, .8))
+
+```
+
+
+------------------------------------------------------------------------
+
+```{r}
+pacman::p_load(ggrain, ggpp, sdamr)
+
+by_subject_pab_df %>%
+  filter(pab > .5) %>%
+  ggplot(data = , aes(x = group, y=pab)) +
+  geom_rain(rain.side = 'f2x2',
+            violin.args = list(alpha = .3),
+            boxplot.args = list(outlier.shape = NA, color = "white", alpha = 0),
+            boxplot.args.pos = list(
+              position = ggpp::position_dodgenudge(x = .1), 
+              width = 0),
+            point.args = list(alpha = 0)
+            ) +
+  stat_summary(fun.data = "mean_cl_normal",
+               position = position_dodge(width = .15), size = 1)+
+  stat_summary(fun = "mean", geom = "line", aes(group = 1),
+               position = position_dodge(width = .15))+
+  theme_apa() + xlab("Group") + ylab("Perceived action boundary") + 
+  #scale_shape_discrete(name="session", labels=c("Session 1", "Session 2")) +
+  #scale_fill_manual(values = c("black", "white"), labels = c("Ascending", "Descending")) +
+  scale_fill_discrete(name="session", labels=c("Session 1", "Session 2")) +
+  guides(lty = "none",
+         color = "none") +
+  theme(legend.position = c(.4, .8))
+
+```
+
+```{r}
+emmeans::emmeans(pab_mdl, specs = pairwise ~ group) 
+```
+
+
+
+```{r}
+choice_mdl <- lmer(choice~group*session + (session|part_num), data = filtered_data_raw_df)
+summary(choice_mdl)
+
+#choice=1 (incorrect); choice= 0 (correct)
+```
+
+```{r}
+ggplot(filtered_data_raw_df, aes(x = ratio, y = choice, col = group)) +
+  stat_summary(fun.data = "mean_se") + 
+  facet_wrap(~direction, ncol = 1)
+```

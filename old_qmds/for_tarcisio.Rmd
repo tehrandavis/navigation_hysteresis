@@ -1,0 +1,263 @@
+---
+title: "Navigation_Study_full sample_preliminary analysis"
+Pressure group size: n= 18
+Non-pressure group size: n= 15 
+  output:
+  html_document:
+    df_print: paged
+---
+
+```{r}
+pacman::p_load(tidyverse, glue, here, DT)
+rawdata_folder <- here("rawdata")
+
+```
+
+```{r}
+<<<<<<< HEAD
+participant_data <- read_csv("NONPRESSURE GROUP/rawP101.csv", col_names = F)
+names(participant_data) <- c("part_num", "block", "trial_num", "ratio", "choice", "decision", "true_pos", "false_neg", "false_pos", "true_neg")
+head(participant_data)
+
+participant_data <- read_csv(rawdata_folder,"PRESSURE GROUP/rawP102.csv", col_names = F)
+=======
+participant_data <- read_csv(here(rawdata_folder,"NONPRESSURE GROUP/rawP105.csv", col_names = F))
+>>>>>>> 1dcd164019d55ef05694453f4f279f1e7d8e85d9
+names(participant_data) <- c("part_num", "block", "trial_num", "ratio", "choice", "decision", "true_pos", "false_neg", "false_pos", "true_neg")
+head(participant_data)
+
+```
+
+```{r}
+participant_data %>% 
+    group_by(part_num, ratio) %>%
+    summarise(
+        choice_prob = mean(choice),
+        true_pos_prob = mean(true_pos),
+        false_pos_prob = mean(false_pos),
+        true_neg_prob = mean(true_neg),
+        false_neg_prob = mean(false_neg)
+    )
+```
+
+```{r}
+# Example in loop - Non pressure group
+
+participants <- c(101,105, 108, 109, 110, 113, 116, 117, 120, 121, 124, 128, 129, 132, 134)
+
+combined_selection_df <- tibble()
+
+for (part_num in participants){
+    filename  <- glue("rawP", part_num, ".csv")
+    individual_selection_data <- here(rawdata_folder,"NONPRESSURE GROUP", filename) %>% read_csv(col_names = F, show_col_types = FALSE)
+    
+    combined_selection_df <- bind_rows(combined_selection_df, individual_selection_data)
+}
+
+names(combined_selection_df) <- c("part_num", "block", "trial_num", "ratio", "choice", "decision", "true_pos", "false_neg", "false_pos", "true_neg")
+combined_selection_df
+```
+
+```{r reorganizing no_pressure}
+
+no_p101_df <- combined_selection_df %>% filter(part_num != 101)
+  
+size_df <- nrow(no_p101_df)
+
+  combined_selection_df <- 
+  no_p101_df %>%
+  arrange(part_num, ratio, trial_num) %>%
+  mutate(direction = rep(c("Asc","Desc"), each = 9, size_df/18)) %>%
+  select(direction, everything())
+
+```
+
+```{r reorganizing pressure group}
+
+direction_combined_selection_df_pressure <- combined_selection_df_pressure %>%
+  
+arrange(part_num, ratio, trial_num) %>%
+  mutate(direction = rep(c("Asc","Desc"), each = 9, 2592/18)) %>%
+  select(direction, everything())
+```
+
+
+```{r}
+# Example in loop - Pressure group
+
+participants <- c(102, 103, 104, 106, 107, 111, 112, 114, 115, 118, 119, 122, 123, 126, 127, 130, 131, 133)
+
+combined_selection_df_pressure <- tibble()
+
+for (part_num in participants){
+    filename  <- glue("rawP", part_num, ".csv")
+    individual_selection_data <- here(rawdata_folder,"PRESSURE GROUP", filename) %>% read_csv(col_names = F, show_col_types = FALSE)
+    
+    combined_selection_df_pressure <- bind_rows(combined_selection_df_pressure, individual_selection_data)
+}
+
+names(combined_selection_df_pressure) <- c("part_num", "block", "trial_num", "ratio", "choice", "decision", "true_pos", "false_neg", "false_pos", "true_neg")
+combined_selection_df_pressure
+```
+
+```{r}
+# retrieve data from the Non pressure group loop chunk
+prob_selection_df <- 
+    combined_selection_df %>% 
+    group_by(part_num, direction, ratio) %>%
+    summarise(
+        choice_prob = mean(choice),
+        decision_prob = mean(decision),
+        true_pos_prob = mean(true_pos),
+        false_pos_prob = mean(false_pos),
+        true_neg_prob = mean(true_neg),
+        false_neg_prob = mean(false_neg)
+    ) %>%
+  mutate(group = "nonpressure")
+    
+prob_selection_df
+```
+
+```{r}
+# retrieve data from the Pressure group loop chunk
+# I added the word "pressure" to the previous "combined_selection_df".
+
+prob_selection_df_pressure <- 
+    direction_combined_selection_df_pressure %>% 
+    group_by(part_num, direction, ratio) %>%
+    summarise(
+        choice_prob = mean(choice),
+        decision_prob = mean(decision),
+        true_pos_prob = mean(true_pos),
+        false_pos_prob = mean(false_pos),
+        true_neg_prob = mean(true_neg),
+        false_neg_prob = mean(false_neg)
+    ) %>%
+  mutate(group = "pressure")
+    
+prob_selection_df_pressure
+```
+
+```{r combining the groups}
+# none of the 3 data frames (alltogether, prob_selection_df, prob_selection_df_pressure) are organized with the direction column. The ratio is organized by 9s always in ascending order. But the labels (asc or desc) do not correspond to that order, meaning that these two columns (ratio and direction) are not linked. 
+
+alltogether <- 
+  bind_rows(prob_selection_df, prob_selection_df_pressure) 
+view(alltogether)
+
+```
+
+```{r visualizing the data}
+#Generating s-shaped plots for both groups
+alltogether %>%
+    ggplot(., aes(x = ratio, y = decision_prob)) +
+    #ggplot(., aes(x = ratio, y = decision_prob, color = direction)) +
+    geom_point() +
+    geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+  facet_wrap(~group)
+  facet_wrap(~group*direction)
+
+```
+
+```{r outlier check}
+pacman::p_load(EnvStats)
+
+alltogether %>%
+  group_by(group, ratio) %>%
+  select(decision_prob) %>%
+  pull() %>%
+  rosnerTest(., k = 10)
+#Non-pressure group
+rosnerTest(prob_selection_df$decision_prob, k=10)
+rosnerTest(prob_selection_df$false_neg_prob, k=10)
+rosnerTest(prob_selection_df$false_pos_prob,k=10)
+
+#Pressure group
+rosnerTest(prob_selection_df_pressure$decision_prob,k=10)
+rosnerTest(prob_selection_df_pressure$false_neg_prob,k=10)
+rosnerTest(prob_selection_df_pressure$false_pos_prob,k=10)
+
+#Does make sense to look for outliers in more than one parameter? 
+# Grab the outliers
+# outliers1= nonpressure
+# outliers2= pressure
+
+outliers1 <- boxplot(prob_selection_df$decision_prob, plot = TRUE, xlab = "Non-pressure_Decision Prob")$out
+outliers2 <- boxplot(prob_selection_df_pressure$decision_prob, plot = TRUE, xlab = "Pressure_Decision Prob")$out
+
+```
+
+## linear model
+
+```{r linear mode;}
+# Fit a linear regression model
+model_lm <- lm(decision_prob ~ ratio * group, data = alltogether)
+summary
+
+
+pacman::p_load(performance, see, patchwork)
+
+performance::check_model(model_lm)
+performance::check_normality(model_lm)
+```
+
+## mixed model
+
+```{r}
+pacman::p_load(lmerTest)
+## Reasoning behind the regression building process.
+
+## Our regression analysis includes two levels: within group and in-between group. In the first, we need to verify if the parameters/predictors have an influence on the decision making of going through or around. These predictors are: ratio and direction. The expectation would be that both predictors are correlated with the decision making process.
+
+##Now with the second level of analysis, we need to verify if the group condition (pressure X non-pressure) influences the correlation between the the IVs (ratio and direction) and the DV (decision making).
+
+## Our DV (decision making) has been organized/labeled in four ways/levels: true pos/neg; false pos/neg.
+
+##TASK: build the multi-leveling/mixed model that contemplates all that!!
+
+# Jeromy has included 3 variables as IVs: ratio, inefficient decisions (false negative column here. Participant went around (longer route) when possible to go through) and risky decisions (false positive column here. Participants bumped on the NPC). In our case, the fourth IV would be direction (for the hysteresis analysis). Our DV is decision_prob, which is where we are looking for the hysteresis effect.
+
+```
+
+```{r regression model with direction effect}
+model_lm <- lm(decision_prob ~ ratio * group * direction, data = alltogether)
+
+summary(model_lm)
+
+model_lmer <- glmer(decision_prob ~ ratio * direction * group + (1|part_num),
+                    family = "binomial",
+                    data = alltogether)
+
+summary(model_lmer)
+```
+```{r}
+## **Edit the codes to insert Navigation data frame**!!
+# Identifying outliers. Boxplot and quartiles.
+# Create boxplot
+boxplot(mtcars$mpg)
+
+# Identify outliers
+outliers <- boxplot.stats(mtcars$mpg)$out
+
+# Label outliers
+text(x = 1, y = outliers, labels = round(outliers, 2), pos = 4)
+
+
+# Identifying outliers. Standardized residuals and linear regression model fit.
+# Load data
+data <- data.frame(x = c(8, 12, 12, 13, 14, 16, 17, 22, 24, 26, 29, 30), y = c(41, 42, 39, 37, 35, 39, 45, 46, 39, 49, 55, 57))
+
+# Fit the regression model
+model <- lm(y ~ x, data = data)
+
+# Calculate the standardized residuals
+standard_res <- rstandard(model)
+
+# Column bind standardized residuals back to original data frame
+final_data <- cbind(data, standard_res)
+
+# Sort standardized residuals descending
+final_data[order(-standard_res),]
+
+```
+
