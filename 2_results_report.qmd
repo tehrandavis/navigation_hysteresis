@@ -171,7 +171,6 @@ test_pab
 
 PsychPlot(test_glm, showData = T, ps.lab = "test_glm")
 ```
-
 ## Batched Perceived Action Boundary Calculation
 
 ```{r}
