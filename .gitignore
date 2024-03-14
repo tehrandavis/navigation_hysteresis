@@ -49,5 +49,6 @@ po/*~
 rsconnect/
 
 # ds store
-.DS_Store
+**/.DS_Store
 
+.DS_Store
